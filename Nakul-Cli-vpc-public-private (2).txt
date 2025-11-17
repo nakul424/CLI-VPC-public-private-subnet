@@ -1,0 +1,212 @@
+step 1 : create instance
+
+aws ec2 run-instances \
+    --image-id ami-052064a798f08f0d3 \
+    --count 2 \
+    --instance-type t3.micro \
+    --key-name fortuner \
+    --security-group-ids sg-0886d9e47dcd59601 \
+    --associate-public-ip-address \
+    --user-data '#!/bin/bash
+dnf update -y
+dnf install -y httpd
+echo "<h1>hello mobile loadbalancer page.. </h1>" >> /var/www/html/mobile/index.html
+hostname >> /var/www/html/index.html
+systemctl start httpd
+systemctl enable httpd' \
+    --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=mobile-1}]'
+
+
+step 2: target group
+
+aws elbv2 create-target-group \
+    --name mobile-tg-1 \
+    --protocol HTTP \
+    --port 80 \
+    --target-type instance \
+    --vpc-id vpc-0a1dcfa6a57f1a059 \
+    --health-check-protocol HTTP \
+    --health-check-path / \
+    --query 'TargetGroups[0].TargetGroupArn' \
+    --output text
+
+step 3 : application load balancer
+
+aws elbv2 create-load-balancer \
+    --name application-load-balancer-Nakul \
+    --type application \
+    --scheme internet-facing \
+    --ip-address-type ipv4 \
+    --security-groups sg-0886d9e47dcd59601 \
+    --subnets subnet-0a5dc029efb8217b3 subnet-0c480ef07e7b38644 subnet-09437e31b1c03074c \
+    --query 'LoadBalancers[0].LoadBalancerArn' \
+    --output text
+
+step 4 : create the HTTP listener on ALB
+
+aws elbv2 create-listener \
+    --load-balancer-arn arn:aws:elasticloadbalancing:us-east-1:359210881289:loadbalancer/app/application-load-balancer-Nakul/a2a00547cf691c3e \
+    --protocol HTTP \
+    --port 80 \
+    --default-actions Type=forward,TargetGroupArn=arn:aws:elasticloadbalancing:us-east-1:359210881289:targetgroup/mobile-tg-1/d8e6b38eb6b9be73
+
+
+step 5 : attach mobile target group to instance
+
+ aws elbv2 register-targets \
+     --target-group-arn arn:aws:elasticloadbalancing:us-east-1:359210881289:targetgroup/mobile-tg-1/d8e6b38eb6b9be73 \
+     --targets Id=i-0aa2d21414cb884fd Id=i-046e6892a1157d7f3
+
+step 6 : health check cli (optional)
+ aws elbv2 describe-target-health \
+     --target-group-arn arn:aws:elasticloadbalancing:us-east-1:359210881289:targetgroup/mobile-tg-1/d8e6b38eb6b9be73
+
+-------mobile part concluded
+
+
+step 1:  create instance
+
+aws ec2 run-instances \
+    --image-id ami-052064a798f08f0d3 \
+    --count 2 \
+    --instance-type t3.micro \
+    --key-name fortuner \
+    --security-group-ids sg-0886d9e47dcd59601 \
+    --associate-public-ip-address \
+    --user-data '#!/bin/bash
+dnf update -y
+dnf install -y httpd
+mkdir /var/www/html/grocery
+echo "<h1>hello grocery loadbalancer page.. </h1>" >> /var/www/html/grocery/index.html
+hostname >> /var/www/html/grocery/index.html
+systemctl start httpd
+systemctl enable httpd' \
+    --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=grocery-1}]'
+
+
+step 2:create target group
+
+aws elbv2 create-target-group \
+    --name grocery-tg-1 \
+    --protocol HTTP \
+    --port 80 \
+    --target-type instance \
+    --vpc-id vpc-0a1dcfa6a57f1a059 \
+    --health-check-protocol HTTP \
+    --health-check-path /grocery \
+    --query 'TargetGroups[0].TargetGroupArn' \
+    --output text
+
+
+add rule to existing listener :
+aws elbv2 create-rule \
+    --listener-arn arn:aws:elasticloadbalancing:us-east-1:359210881289:listener/app/application-load-balancer-Nakul/bf82d785ec866801/99f533f4ee5a4332 \
+    --priority 10 \
+    --conditions Field=path-pattern,Values=/grocery* \
+    --actions Type=forward,TargetGroupArn=arn:aws:elasticloadbalancing:us-east-1:359210881289:targetgroup/grocery-tg-1/49ccdaf510944f0e
+
+
+
+step 4 : attach grocery tg to instance
+
+ aws elbv2 register-targets \
+     --target-group-arn arn:aws:elasticloadbalancing:us-east-1:359210881289:targetgroup/grocery-tg-1/85a80f0e888ddfc6 \
+     --targets Id=i-0ac69d87ff2ca10d4 Id=i-06a0fdc3a4356c949
+
+
+
+step 5 : edit rule on same port ie.80
+  
+aws elbv2 modify-listener \
+    --listener-arn arn:aws:elasticloadbalancing:us-east-1:359210881289:listener/app/application-load-balancer-Nakul/a2a00547cf691c3e/bbafff5612222dad \
+    --default-actions '[
+        {
+            "Type": "forward",
+            "ForwardConfig": {
+                "TargetGroups": [
+                    {
+                        "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:359210881289:targetgroup/mobile-tg-1/d8e6b38eb6b9be73",
+                        "Weight": 1
+                    },
+                    {
+                        "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:359210881289:targetgroup/grocery-tg-1/85a80f0e888ddfc6",
+                        "Weight": 1
+                    }
+                ]
+            }
+        }
+    ]'
+
+
+
+--------grocery path ok---------
+
+
+step 1 : create instance
+
+aws ec2 run-instances \
+    --image-id ami-052064a798f08f0d3 \
+    --count 2 \
+    --instance-type t3.micro \
+    --key-name fortuner \
+    --security-group-ids sg-0886d9e47dcd59601 \
+    --associate-public-ip-address \
+    --user-data '#!/bin/bash
+dnf update -y
+dnf install -y httpd
+mkdir /var/www/html/home
+echo "<h1>hello  home pagr.. </h1>" >> /var/www/html/home/index.html
+hostname >> /var/www/html/home/index.html
+systemctl start httpd
+systemctl enable httpd' \
+    --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=home-1}]'
+
+step 2 : create target group
+
+aws elbv2 create-target-group \
+    --name home-tg-1 \
+    --protocol HTTP \
+    --port 80 \
+    --target-type instance \
+    --vpc-id vpc-0a1dcfa6a57f1a059 \
+    --health-check-protocol HTTP \
+    --health-check-path /home \
+    --query 'TargetGroups[0].TargetGroupArn' \
+    --output text
+
+step 3 : Attach tg to instance
+ aws elbv2 register-targets \
+     --target-group-arn arn:aws:elasticloadbalancing:us-east-1:359210881289:targetgroup/home-tg-1/b564ed5520c485c8 \
+     --targets Id=i-0ceff682496fd5936 Id=i-0e19633e42d8f616b
+
+step 4 : add rule to existing listener http port
+
+aws elbv2 modify-listener \
+    --listener-arn arn:aws:elasticloadbalancing:us-east-1:359210881289:listener/app/application-load-balancer-Nakul/a2a00547cf691c3e/bbafff5612222dad \
+    --default-actions '[
+        {
+            "Type": "forward",
+            "ForwardConfig": {
+                "TargetGroups": [
+                    {
+                        "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:359210881289:targetgroup/mobile-tg-1/d8e6b38eb6b9be73",
+                        "Weight": 1
+                    },
+                    {
+                        "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:359210881289:targetgroup/grocery-tg-1/85a80f0e888ddfc6",
+                        "Weight": 1
+                    },
+                    {
+                        "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:359210881289:targetgroup/home-tg-1/b564ed5520c485c8",
+                        "Weight": 1
+                    }
+                ]
+            }
+        }
+    ]'
+
+
+
+------home path ok-------
+
+
